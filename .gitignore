@@ -1,0 +1,4 @@
+sim
+*.vcd
+waves/
+.DS_Store
