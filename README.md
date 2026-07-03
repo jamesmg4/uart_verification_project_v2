@@ -55,7 +55,13 @@ The RX module has a BAUD counter for the system to know when there should be a B
 ### Verfication
 
 ## Loopback Testbench
-
+The loopback testbench connects TX output to the RX input. This lets me verify that the reveived byte matches the orginal byte
+Here are some of the tests I decided to make:
+* Known patterns: Tests like 00, FF, 55, AA, and 92. This covers known tests that cover all known bits, alternating, and a known random before trying to break the implementation
+* Random loop: This test is implemented in a "for" loop to test random sequencies of bits
+* tx_start while tx_busy: starts one transfer, then tries to start another before the first is finished. The expected result is that the second request is ignored.
+* Changing tx_data during transfer: starts sending a byte, changes the input data bus during the frame, and confirms RX still receives the original byte. This verifies that TX captures its input when it accepts tx_start.
+* Reset during transfer: asserts reset while the modules are active, checks that both return to idle and that TX returns high, then sends another byte to confirm clean recovery.
 ## Results
 add waveforms of images of passed test cases
 ## Planned Improvements
