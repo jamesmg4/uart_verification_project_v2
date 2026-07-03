@@ -9,7 +9,9 @@ TODO: add picture of configuration
 In this configuration, the frame starts with a single start bit which transitions to 8 data bits, then finally goes into a stop bit. More specifics on how the protocol is implemented is in the UART Frame Format section.
 ## Repo Structure
 rtl/ has the design of the tx and rx in system verilog
+
 tb/ has the testbenches of tx, rx, and them both integrated
+
 docs/ has some notes that I have marked down about specific module behavior and lessons learned
 ## UART Frame Format
 Here are some quick things about the UART Frame I have implemented:
