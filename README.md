@@ -1,12 +1,27 @@
 # UART Verification Project
 
-SystemVerilog UART controller with a self-checking verification environment.
+## Overview
+This is my UART verification project where I will make a UART transmitter/reciever in verilog. After doing some digital design courses at school, I wanted to start with something managable for my first system verilog solo project. 
 
-## Goals
+The UART format I chose to simulate is a simple 8N1 framing configuration.
+TODO: add picture of configuration
 
-- Build UART transmitter RTL
-- Build UART receiver RTL
-- Write directed tests
-- Add self-checking testbench
-- Add waveform-based debugging
-- Later add assertions, coverage, and randomized tests
+In this configuration, the frame starts with a single start bit which transitions to 8 data bits, then finally goes into a stop bit. More specifics on how the protocol is implemented is in the UART Frame Format section.
+## Repo Structure
+
+## UART Frame Format
+## TX
+### Design
+### Verfication
+
+## RX
+### Design
+### Verfication
+
+## Loopback Testbench
+
+## Challenges
+
+## Results
+
+## Planned Improvements
