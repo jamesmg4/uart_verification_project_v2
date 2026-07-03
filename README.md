@@ -27,6 +27,8 @@ There are 4 states of the transmission module:
 * START
 * DATA
 * STOP
+
+
 The TX module has a BAUD counter for the system to know when there should be a BAUD tick. Whenever the BAUD counter gets to the set number, it will acitivate a BAUD tick so that the transmission goes to the next state or data bit.
 A couple signals determine the state of the tranmission. "tx_start" signals from the controller it wants to send some data. This sends the tx signal line low, and transitions the "tx_busy" state to true. In this implementation, a "tx_busy" state is used to let the controller know that there is already a tranmission going on. "tx_data" is an 8 bit register that is loaded in parallel to the tx module so that it can send the data to the receiver. This module loads all TX data at the start of the transmission
 
