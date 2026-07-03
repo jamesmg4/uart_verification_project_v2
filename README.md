@@ -40,12 +40,29 @@ A couple signals determine the state of the tranmission. "tx_start" signals from
 
 ## RX
 ### Design
+
+There are 4 states of the transmission module:
+* IDLE
+* START
+* DATA
+* STOP
+
+When the recevier detects the transmission line goes low, the IDLE state goes to START. Once in the START state, the receiver checks the transmission line after half the BAUD time to make sure the line still low. This verifies that the line didn't just flicker low, and actually wants to transmit data.
+
+The RX module has a BAUD counter for the system to know when there should be a BAUD tick. Whenever the BAUD counter gets to the set number, it will acitivate a BAUD tick so that the transmission goes to the next state or data bit. The BAUD counter in this module is implemented so that the reciver will read the data line between the BAUD ticks of the transceiver.
+
+"rx_valid" is an output signal that goes high when transmission is complete.
 ### Verfication
 
 ## Loopback Testbench
 
-## Challenges
-
 ## Results
-
+add waveforms of images of passed test cases
 ## Planned Improvements
+- Parity bit
+- Framing-error detection
+- Oversampling receiver
+- Configurable stop bits
+- Configurable data widths
+- FIFO buffering
+- FPGA hardware test
