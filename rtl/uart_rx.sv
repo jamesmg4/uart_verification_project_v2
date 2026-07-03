@@ -1,15 +1,15 @@
-module uart_tx #(
+module uart_rx #(
     parameter int BAUD_DIV = 10
 )(
     input  logic clk,
     input  logic rst_n,
 
-    input  logic tx_start,
-    input  logic [7:0] tx_data,
+    input  logic rx,             // serial line coming from transmitter
 
-    output logic tx,
-    output logic tx_busy
-);
+    output logic [7:0] rx_data,  // received byte
+    output logic rx_valid,       // pulse when a byte is received
+    output logic rx_busy         // receiver currently receiving
+);  
 
 
 
@@ -23,15 +23,16 @@ module uart_tx #(
     state_t state, next_state;
 
     //shift register
-    logic [7:0] shift_reg;
+    localparam int HALF_BAUD_DIV = BAUD_DIV / 2;
+    localparam int BAUD_COUNTER_WIDTH = $clog2(BAUD_DIV);
+
     logic [2:0] bit_counter;
-    logic [$clog2(BAUD_DIV)-1:0] baud_counter;
+    logic [BAUD_COUNTER_WIDTH-1:0] baud_counter;
 
     logic baud_tick;
 
-    assign baud_tick = (baud_counter == BAUD_DIV-1);
-    assign tx_busy = (state != IDLE);
-    
+    assign baud_tick = (baud_counter == BAUD_COUNTER_WIDTH'(BAUD_DIV-1));
+    assign rx_busy = (state != IDLE);
 
     // state register
     always_ff @(posedge clk or negedge rst_n) begin
@@ -46,12 +47,17 @@ module uart_tx #(
         next_state = state;
         case(state)
             IDLE: begin
-                if(tx_start)
+                if(rx == 0)
                     next_state = START;
             end
             START: begin
-                if(baud_tick)
-                    next_state = DATA;
+                if(baud_counter == BAUD_COUNTER_WIDTH'(HALF_BAUD_DIV-1)) begin
+                    if(rx == 1'b0)
+                        next_state = DATA;
+                    else
+                        next_state = IDLE;
+                end
+                    
             end
             DATA: begin
                 if(baud_tick && bit_counter == 3'b111)
@@ -74,6 +80,8 @@ module uart_tx #(
             baud_counter <= '0;
         else if (state == IDLE)
             baud_counter <= '0;
+        else if (state == START && baud_counter == BAUD_COUNTER_WIDTH'(HALF_BAUD_DIV-1))
+            baud_counter <= '0;
         else if (baud_tick)
             baud_counter <= '0;
         else
@@ -83,21 +91,26 @@ module uart_tx #(
     //shift register and bit counter
     always_ff @(posedge clk or negedge rst_n) begin
         if(!rst_n)begin
-            shift_reg <= 8'b0;
+            rx_data <= 8'b0;
             bit_counter <= 3'b0;
+            rx_valid <= 1'b0;
         end
         else begin
+            rx_valid <= 1'b0; 
             case(state)
                 IDLE: begin
                     bit_counter <= 3'b0;
-
-                    if(tx_start)
-                        shift_reg <= tx_data;
                 end
                 DATA: begin
                     if(baud_tick) begin
-                        shift_reg <= shift_reg >> 1;
+                        rx_data[bit_counter] <= rx;
                         bit_counter <= bit_counter + 1'b1;
+                    end
+                end
+                STOP: begin
+                    if(baud_tick) begin
+                        if(rx == 1'b1)
+                            rx_valid <= 1'b1;
                     end
                 end
                 default: begin
@@ -107,27 +120,11 @@ module uart_tx #(
         end
     end
 
-    always_comb begin
-        case(state)
-            IDLE:
-                tx = 1'b1;
-            START:
-                tx = 1'b0;
-            DATA:
-                tx = shift_reg[0];
-            STOP:
-                tx = 1'b1;
-            default: begin
-                tx = 1'b1;
-            end
-        endcase
-    end
-
 endmodule
 
 /*
 baud_counter decides WHEN to move
 bit_counter decides HOW MANY data bits were sent
-shift_reg decides WHICH data bit is currently on tx
+rx_data decides WHICH data bit is currently on tx
 FSM decides WHAT phase we are in
 */

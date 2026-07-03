@@ -1,13 +1,13 @@
 module shift_register_tb;
 
-    logic rst_n,
-    logic clk,
+    logic rst_n;
+    logic clk;
 
-    logic load,
-    logic shift,
+    logic load;
+    logic shift;
 
-    logic [7:0] data_in,
-    logic data_out
+    logic [7:0] data_in;
+    logic data_out;
 
     // Device Under Test (DUT)
     shift_register dut (
