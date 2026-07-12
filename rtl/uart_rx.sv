@@ -1,5 +1,7 @@
 module uart_rx #(
-    parameter int BAUD_DIV = 10
+    parameter int BAUD_RATE = 10,
+    parameter int CLK_SPEED = 100,
+    parameter DATA_BITS = 8
 )(
     input  logic clk,
     input  logic rst_n,
@@ -22,16 +24,20 @@ module uart_rx #(
 
     state_t state, next_state;
 
-    //shift register
-    localparam int HALF_BAUD_DIV = BAUD_DIV / 2;
-    localparam int BAUD_COUNTER_WIDTH = $clog2(BAUD_DIV);
+    localparam int CLKS_PER_BIT = CLK_SPEED/BAUD_RATE;
+    localparam int BAUD_COUNTER_WIDTH = ($clog2(CLKS_PER_BIT) == 1) ? 1 : $clog2(CLKS_PER_BIT);
+    localparam int BIT_COUNTER_WIDTH = ($clog2(DATA_BITS) == 1) ? 1 : $clog2(DATA_BITS);
 
-    logic [2:0] bit_counter;
+    //shift register
+    localparam int HALF_BAUD_DIV = CLKS_PER_BIT / 2;
+
+    logic [DATA_BITS:0] shift_reg;
+    logic [BIT_COUNTER_WIDTH-1:0] bit_counter;
     logic [BAUD_COUNTER_WIDTH-1:0] baud_counter;
 
     logic baud_tick;
 
-    assign baud_tick = (baud_counter == BAUD_COUNTER_WIDTH'(BAUD_DIV-1));
+    assign baud_tick = (baud_counter == CLKS_PER_BIT-1);
     assign rx_busy = (state != IDLE);
 
     // state register
@@ -60,7 +66,7 @@ module uart_rx #(
                     
             end
             DATA: begin
-                if(baud_tick && bit_counter == 3'b111)
+                if(baud_tick && bit_counter == DATA_BITS-1)
                     next_state = STOP;
             end
             STOP: begin

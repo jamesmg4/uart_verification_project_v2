@@ -1,19 +1,27 @@
+`timescale 1ns/1ps
 module uart_rx_tb;
 
+    // Keep these settings aligned with the DUT parameters below.
     localparam int CLK_PERIOD = 10;
-    localparam int BAUD_DIV   = 10;
-    localparam int BIT_TIME   = CLK_PERIOD * BAUD_DIV;
+    localparam int CLK_SPEED  = 100000000;
+    localparam int BAUD_RATE  = 10000000;
+    localparam int DATA_BITS  = 8;
+
+    localparam int CLKS_PER_BIT = CLK_SPEED / BAUD_RATE;
+    localparam int BIT_TIME     = CLK_PERIOD * CLKS_PER_BIT;
 
     logic clk;
     logic rst_n;
     logic rx;
 
-    logic [7:0] rx_data;
+    logic [DATA_BITS-1:0] rx_data;
     logic       rx_valid;
     logic       rx_busy;
 
     uart_rx #(
-        .BAUD_DIV(BAUD_DIV)
+        .BAUD_RATE(BAUD_RATE),
+        .CLK_SPEED(CLK_SPEED),
+        .DATA_BITS(DATA_BITS)
     ) dut (
         .clk(clk),
         .rst_n(rst_n),
@@ -34,7 +42,7 @@ module uart_rx_tb;
     //--------------------------------------------------
     // Drive a UART frame into RX
     //--------------------------------------------------
-    task automatic drive_uart_byte(input logic [7:0] data);
+    task automatic drive_uart_byte(input logic [DATA_BITS-1:0] data);
         int i;
         begin
             // idle before frame
@@ -46,7 +54,7 @@ module uart_rx_tb;
             #(BIT_TIME);
 
             // data bits, LSB first
-            for (i = 0; i < 8; i++) begin
+            for (i = 0; i < DATA_BITS; i++) begin
                 rx = data[i];
                 #(BIT_TIME);
             end
@@ -60,7 +68,7 @@ module uart_rx_tb;
     //--------------------------------------------------
     // Send one byte and check received result
     //--------------------------------------------------
-   task automatic send_and_check(input logic [7:0] data);
+    task automatic send_and_check(input logic [DATA_BITS-1:0] data);
         int i;
         int timeout_count;
 
@@ -76,7 +84,7 @@ module uart_rx_tb;
             #(BIT_TIME);
 
             // data bits, LSB first
-            for (i = 0; i < 8; i++) begin
+            for (i = 0; i < DATA_BITS; i++) begin
                 rx = data[i];
                 #(BIT_TIME);
             end
@@ -90,15 +98,50 @@ module uart_rx_tb;
             end
 
             if (timeout_count == 2000)
-                $fatal(1, "Timeout waiting for rx_valid for byte %02h", data);
+                $fatal(1, "Timeout waiting for rx_valid for byte %0h", data);
 
             assert (rx_data == data)
-                else $error("Expected %02h, got %02h", data, rx_data);
+                else $error("Expected %0h, got %0h", data, rx_data);
 
-            $display("PASS: RX byte %02h", data);
+            $display("PASS: RX byte %0h", data);
 
             #(BIT_TIME);
             repeat (2) @(posedge clk);
+        end
+    endtask
+
+    //--------------------------------------------------
+    // Reset during an active frame
+    //--------------------------------------------------
+    task automatic test_reset_during_receive;
+        begin
+            // Start a frame and hold RX low for the start bit.
+            @(negedge clk);
+            rx = 1'b0;
+
+            // Wait long enough for the receiver to leave IDLE and begin reception.
+            #(2 * BIT_TIME);
+
+            // Assert reset away from the DUT sampling edge.
+            @(negedge clk);
+            rst_n = 1'b0;
+
+            // Reset should immediately cancel the partially received frame.
+            #1;
+            assert (rx_busy == 1'b0)
+                else $error("RESET test failed: rx_busy did not return low");
+            assert (rx_valid == 1'b0)
+                else $error("RESET test failed: rx_valid remained high");
+
+            // Release reset on a safe edge and restore the idle line.
+            @(negedge clk);
+            rst_n = 1'b1;
+            rx    = 1'b1;
+
+            repeat (2) @(posedge clk);
+
+            if (rx_busy == 1'b0 && rx_valid == 1'b0)
+                $display("PASS: reset during reception returned RX to idle");
         end
     endtask
 
@@ -113,7 +156,12 @@ module uart_rx_tb;
         rst_n = 1'b1;
 
         repeat (2) @(posedge clk);
+        
+        // Reset must abort a partially received UART frame.
+        test_reset_during_receive();
 
+        // For a different configuration, change DATA_BITS, BAUD_RATE, or CLK_SPEED
+        // above; these same tests will adapt to the configured frame width and timing.
         send_and_check(8'hA5);
         send_and_check(8'h55);
         send_and_check(8'h00);

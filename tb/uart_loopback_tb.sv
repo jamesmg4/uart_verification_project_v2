@@ -1,7 +1,13 @@
 module uart_loopback_tb;
 
+    // Keep these settings aligned with both DUT instances below.
     localparam int CLK_PERIOD = 10;
-    localparam int BAUD_DIV   = 10;
+    localparam int CLK_SPEED  = 100;
+    localparam int BAUD_RATE  = 10;
+    localparam int DATA_BITS  = 8;
+
+    localparam int CLKS_PER_BIT = CLK_SPEED / BAUD_RATE;
+    localparam int BIT_TIME     = CLK_PERIOD * CLKS_PER_BIT;
 
     logic clk;
     logic rst_n;
@@ -9,14 +15,18 @@ module uart_loopback_tb;
     logic serial_line;
 
     logic tx_start;
-    logic [7:0] tx_data;
+    logic [DATA_BITS-1:0] tx_data;
     logic tx_busy;
 
-    logic [7:0] rx_data;
+    logic [DATA_BITS-1:0] rx_data;
     logic rx_valid;
     logic rx_busy;
 
-    uart_tx #(.BAUD_DIV(BAUD_DIV)) tx_dut (
+    uart_tx #(
+        .BAUD_RATE(BAUD_RATE),
+        .CLK_SPEED(CLK_SPEED),
+        .DATA_BITS(DATA_BITS)
+    ) tx_dut (
         .clk(clk),
         .rst_n(rst_n),
         .tx_start(tx_start),
@@ -25,7 +35,11 @@ module uart_loopback_tb;
         .tx_busy(tx_busy)
     );
 
-    uart_rx #(.BAUD_DIV(BAUD_DIV)) rx_dut (
+    uart_rx #(
+        .BAUD_RATE(BAUD_RATE),
+        .CLK_SPEED(CLK_SPEED),
+        .DATA_BITS(DATA_BITS)
+    ) rx_dut (
         .clk(clk),
         .rst_n(rst_n),
         .rx(serial_line),
@@ -48,7 +62,7 @@ module uart_loopback_tb;
         end
     endtask
 
-    task automatic pulse_tx_start(input logic [7:0] data);
+    task automatic pulse_tx_start(input logic [DATA_BITS-1:0] data);
         begin
             @(negedge clk);
             tx_data  = data;
@@ -59,18 +73,18 @@ module uart_loopback_tb;
         end
     endtask
 
-    task automatic send_and_expect(input logic [7:0] data);
+    task automatic send_and_expect(input logic [DATA_BITS-1:0] data);
         begin
-            $display("Starting byte %02h at time %0t", data, $time);
+            $display("Starting byte %0h at time %0t", data, $time);
             wait_for_idle();
             pulse_tx_start(data);
 
             wait (rx_valid == 1'b1);
 
             assert (rx_data == data)
-                else $error("Expected %02h, got %02h", data, rx_data);
+                else $error("Expected %0h, got %0h", data, rx_data);
 
-            $display("PASS: TX->RX byte %02h", data);
+            $display("PASS: TX->RX byte %0h", data);
         end
     endtask
 
@@ -86,19 +100,19 @@ module uart_loopback_tb;
     endtask
 
     task automatic test_random_loopback;
-        byte rand_byte;
+        logic [DATA_BITS-1:0] rand_byte;
         begin
             $display("\n--- test_random_loopback ---");
             repeat (100) begin
-                rand_byte = $urandom_range(0, 255);
+                rand_byte = $urandom;
                 send_and_expect(rand_byte);
             end
         end
     endtask
 
     task automatic test_tx_start_while_busy_is_ignored;
-        logic [7:0] first_byte;
-        logic [7:0] ignored_byte;
+        logic [DATA_BITS-1:0] first_byte;
+        logic [DATA_BITS-1:0] ignored_byte;
         begin
             $display("\n--- test_tx_start_while_busy_is_ignored ---");
             first_byte   = 8'h3C;
@@ -113,10 +127,10 @@ module uart_loopback_tb;
 
             wait (rx_valid == 1'b1);
             assert (rx_data == first_byte)
-                else $error("Busy test: expected first byte %02h, got %02h", first_byte, rx_data);
+                else $error("Busy test: expected first byte %0h, got %0h", first_byte, rx_data);
 
             // Give enough time for an incorrectly accepted second frame to appear.
-            repeat (BAUD_DIV * 12) @(posedge clk);
+            repeat (CLKS_PER_BIT * (DATA_BITS + 4)) @(posedge clk);
             assert (tx_busy == 1'b0)
                 else $error("Busy test: TX did not return to idle");
             assert (rx_valid == 1'b0)
@@ -127,7 +141,7 @@ module uart_loopback_tb;
     endtask
 
     task automatic test_tx_data_is_captured_at_start;
-        logic [7:0] expected_byte;
+        logic [DATA_BITS-1:0] expected_byte;
         begin
             $display("\n--- test_tx_data_is_captured_at_start ---");
             expected_byte = 8'h92;
@@ -142,7 +156,7 @@ module uart_loopback_tb;
 
             wait (rx_valid == 1'b1);
             assert (rx_data == expected_byte)
-                else $error("Data capture test: expected %02h, got %02h", expected_byte, rx_data);
+                else $error("Data capture test: expected %0h, got %0h", expected_byte, rx_data);
 
             $display("PASS: tx_data is captured when tx_start is accepted");
         end
@@ -154,7 +168,7 @@ module uart_loopback_tb;
             wait_for_idle();
             pulse_tx_start(8'hC3);
             wait (tx_busy == 1'b1);
-            repeat (BAUD_DIV * 3) @(posedge clk);
+            repeat (CLKS_PER_BIT * 3) @(posedge clk);
 
             @(negedge clk);
             rst_n = 1'b0;
@@ -187,6 +201,8 @@ module uart_loopback_tb;
 
         repeat (2) @(posedge clk);
         
+        // Change CLK_SPEED, BAUD_RATE, or DATA_BITS above to rerun this same
+        // end-to-end suite with a different UART configuration.
         test_basic_loopback();
         test_random_loopback();
         test_tx_start_while_busy_is_ignored();

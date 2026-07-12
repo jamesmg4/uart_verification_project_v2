@@ -1,35 +1,45 @@
 module uart_tx #(
-    parameter int BAUD_DIV = 10
+    parameter int BAUD_RATE = 10,
+    parameter int CLK_SPEED = 100,
+    parameter DATA_BITS = 8,
+    parameter bit PARITY_ENABLE = 1'b1,
+    parameter bit PARITY_ODD = 1'b1
 )(
-    input  logic clk,
+    input  logic clk,   
     input  logic rst_n,
 
     input  logic tx_start,
-    input  logic [7:0] tx_data,
+    input  logic [DATA_BITS-1:0] tx_data,
 
     output logic tx,
     output logic tx_busy
 );
 
 
-
-    typedef enum logic [1:0] {
+    
+    typedef enum logic [2:0] {
         IDLE,
         START,
         DATA,
+        PARITY,
         STOP
     } state_t; // created so that I can delare multple state variables cleanly
 
     state_t state, next_state;
 
+    localparam int CLKS_PER_BIT = CLK_SPEED/BAUD_RATE;
+    localparam int BAUD_COUNTER_WIDTH = ($clog2(CLKS_PER_BIT) == 1) ? 1 : $clog2(CLKS_PER_BIT);
+    localparam int BIT_COUNTER_WIDTH = ($clog2(DATA_BITS) == 1) ? 1 : $clog2(DATA_BITS);
+
     //shift register
-    logic [7:0] shift_reg;
-    logic [2:0] bit_counter;
-    logic [$clog2(BAUD_DIV)-1:0] baud_counter;
+    logic [DATA_BITS:0] shift_reg;
+    logic [BIT_COUNTER_WIDTH-1:0] bit_counter;
+    logic [BAUD_COUNTER_WIDTH-1:0] baud_counter;
 
     logic baud_tick;
+    bit parity_bit;
 
-    assign baud_tick = (baud_counter == BAUD_DIV-1);
+    assign baud_tick = (baud_counter == CLKS_PER_BIT-1);
     assign tx_busy = (state != IDLE);
     
 
@@ -54,7 +64,11 @@ module uart_tx #(
                     next_state = DATA;
             end
             DATA: begin
-                if(baud_tick && bit_counter == 3'b111)
+                if(baud_tick && bit_counter == DATA_BITS-1)
+                    next_state = (PARITY_ENABLE == 1) ? PARITY : STOP;
+            end
+            PARITY: begin
+                if(baud_tick)
                     next_state = STOP;
             end
             STOP: begin
@@ -90,9 +104,16 @@ module uart_tx #(
             case(state)
                 IDLE: begin
                     bit_counter <= 3'b0;
-
-                    if(tx_start)
+                
+                    if(tx_start) begin
                         shift_reg <= tx_data;
+                        if(PARITY_ODD) begin
+                            parity_bit <= ~^tx_data;
+                        end
+                        else begin
+                            parity_bit <= ^tx_data;
+                        end
+                    end
                 end
                 DATA: begin
                     if(baud_tick) begin
@@ -115,6 +136,8 @@ module uart_tx #(
                 tx = 1'b0;
             DATA:
                 tx = shift_reg[0];
+            PARITY:
+                tx = parity_bit;
             STOP:
                 tx = 1'b1;
             default: begin
