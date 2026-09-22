@@ -1,5 +1,8 @@
 `timescale 1ns / 1ps
-module uart_tx_tb;
+module uart_tx_tb #(
+    parameter bit PARITY_ENABLE = 1'b1,
+    parameter bit PARITY_ODD = 1'b1
+);
 
     
     localparam int CLK_PERIOD = 20;
@@ -8,8 +11,6 @@ module uart_tx_tb;
     localparam int CLKS_PER_BIT = CLK_RATE/BAUD_RATE;
     localparam time BIT_TIME   = CLKS_PER_BIT * CLK_PERIOD;
     localparam int  DATA_BITS    = 8;
-    localparam bit PARITY_ENABLE = 1;
-    localparam bit PARITY_ODD = 1;
 
     logic clk;
     logic rst_n;
@@ -77,10 +78,12 @@ module uart_tx_tb;
             end
 
             // check the parity bit
-            #(BIT_TIME);
-            if(tx !== parity_bit)
-                $error("PARITY bit failed. Expected %b, got %b", parity_bit, tx);
-            $display("PARITY bit passed");
+            if (PARITY_ENABLE) begin
+                #(BIT_TIME);
+                if(tx !== parity_bit)
+                    $error("PARITY bit failed. Expected %b, got %b", parity_bit, tx);
+                $display("PARITY bit passed");
+            end
             // Check the stop bit.
             #(BIT_TIME);
             if (tx !== 1'b1)
@@ -164,13 +167,13 @@ module uart_tx_tb;
                 $error("RESET test failed: tx did not return high after reset");
             if (tx_busy !== 1'b0)
                 $error("RESET test failed: tx_busy did not return low after reset");
-            if (dut.state !== 2'b00)
+            if (dut.state !== dut.IDLE)
                 $error("RESET test failed: state did not return to IDLE");
 
             @(negedge clk);
             rst_n = 1'b1;
 
-            if (tx === 1'b1 && tx_busy === 1'b0 && dut.state === 2'b00)
+            if (tx === 1'b1 && tx_busy === 1'b0 && dut.state === dut.IDLE)
                 $display("PASS: reset during transmission returned TX to idle");
         end
     endtask
@@ -235,6 +238,11 @@ module uart_tx_tb;
     //     end
     // end
 
+    initial begin
+        assert (BAUD_RATE > 0) else $error("BAUD_RATE must be greater than 0");
+        assert (CLK_RATE >= BAUD_RATE) else $error("CLK_RATE must be greater than or equal to BAUD_RATE");
+        assert (DATA_BITS > 0) else $error("DATA_BITS must be greater than 0");
+    end
     // Waveform dump
     initial begin
         $dumpfile("uart_tx.vcd");

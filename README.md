@@ -1,74 +1,62 @@
 # UART Verification Project
 
 ## Overview
-This is my UART verification project where I will make a UART transmitter/reciever in verilog. After doing some digital design courses at school, I wanted to start with something managable for my first system verilog solo project. 
 
-The UART format I chose to simulate is a simple 8N1 framing configuration.
-TODO: add picture of configuration
+I built this UART transmitter, receiver, and verification environment in SystemVerilog as my first independent RTL project after taking digital design courses. I started with 8N1 framing, then added configurable data width and optional even or odd parity. The design is verified in simulation with directed tests, randomized loopback transfers, error injection, and a configuration matrix.
 
-In this configuration, the frame starts with a single start bit which transitions to 8 data bits, then finally goes into a stop bit. More specifics on how the protocol is implemented is in the UART Frame Format section.
-## Repo Structure
-rtl/ has the design of the tx and rx in system verilog
+## Repository Structure
 
-tb/ has the testbenches of tx, rx, and them both integrated
+- `rtl/uart_tx.sv` and `rtl/uart_rx.sv` contain the transmitter and receiver.
+- `tb/uart_tx_tb.sv` and `tb/uart_rx_tb.sv` test the modules individually.
+- `tb/uart_loopback_tb.sv` connects TX to RX for end-to-end tests.
+- `scripts/run_uart_matrix.sh` runs the automated configuration matrix through `make test-matrix`.
+- `rtl/subModules/` and `tb/subModules_tb/` contain earlier counter and shift-register exercises.
 
-docs/ has some notes that I have marked down about specific module behavior and lessons learned
 ## UART Frame Format
-Here are some quick things about the UART Frame I have implemented:
-* TX is held at an idle high, and when pulled to low the tranmission will start
-* The first bit of the frame is a start bit. This bit will always will need to be read as low for the transmission to continue
-* The next 8 bits are data bits. The least significant bits will come first, and read on every BAUD tick
-* The last bit is the stop bit which transitions back to high.
 
-## TX
-### Design
-There are 4 states of the transmission module:
-* IDLE
-* START
-* DATA
-* STOP
+The serial line is high when idle. A frame contains one low start bit, `DATA_BITS` data bits sent least-significant bit first, an optional parity bit, and one high stop bit. The receiver checks the start bit near its midpoint, then samples subsequent bits at the configured bit interval.
 
+| Parameter | Purpose | Default |
+| --- | --- | ---: |
+| `CLK_SPEED` | Input clock frequency | `100` |
+| `BAUD_RATE` | UART baud rate | `10` |
+| `DATA_BITS` | Data bits per frame | `8` |
+| `PARITY_ENABLE` | Include a parity bit | `0` |
+| `PARITY_ODD` | Select odd parity; `0` selects even parity | `0` |
 
-The TX module has a BAUD counter for the system to know when there should be a BAUD tick. Whenever the BAUD counter gets to the set number, it will acitivate a BAUD tick so that the transmission goes to the next state or data bit.
+The implementation uses integer division for `CLK_SPEED / BAUD_RATE`, so choose an appropriate integer number of clocks per bit. The transmitter and receiver must use the same parameters.
 
-A couple signals determine the state of the tranmission. "tx_start" signals from the controller it wants to send some data. This sends the tx signal line low, and transitions the "tx_busy" state to true. In this implementation, a "tx_busy" state is used to let the controller know that there is already a tranmission going on. 
+## Transmitter
 
-"tx_data" is an 8 bit register that is loaded in parallel to the tx module so that it can send the data to the receiver. This module loads all TX data at the start of the transmission
+The TX state machine has five states: `IDLE`, `START`, `DATA`, `PARITY`, and `STOP`. Its baud counter sets the duration of each bit, while a bit counter tracks progress through the data field.
 
-### Verfication
+When `tx_start` is accepted in `IDLE`, TX captures `tx_data` and calculates its parity bit. This means changing the input data during a frame does not change the transmitted value. `tx_busy` is high throughout the active frame. A `tx_start` request while busy is ignored because this design has no request queue or FIFO; simulation reports that interface misuse.
 
+The standalone TX testbench checks serial bits, parity, requests while busy, and reset during transmission. Simulation-only assertions check idle-line behavior and counter ranges.
 
-## RX
-### Design
+## Receiver
 
-There are 4 states of the transmission module:
-* IDLE
-* START
-* DATA
-* STOP
+The RX state machine uses the same five frame phases. It checks that a detected low start bit is still low near the midpoint, then samples data bits, optional parity, and the stop bit.
 
-When the recevier detects the transmission line goes low, the IDLE state goes to START. Once in the START state, the receiver checks the transmission line after half the BAUD time to make sure the line still low. This verifies that the line didn't just flicker low, and actually wants to transmit data.
+`rx_data` holds the received data. `rx_valid` pulses for one clock after a frame with a valid stop bit. `parity_error` pulses when an enabled parity check fails, and `framing_error` pulses when the stop bit is low. `rx_busy` is high while a frame is being received. A parity error can coincide with `rx_valid` if the stop bit is valid.
 
-The RX module has a BAUD counter for the system to know when there should be a BAUD tick. Whenever the BAUD counter gets to the set number, it will acitivate a BAUD tick so that the transmission goes to the next state or data bit. The BAUD counter in this module is implemented so that the reciver will read the data line between the BAUD ticks of the transceiver.
+The standalone RX testbench checks received data, corrupted parity, invalid stop bits, and reset during reception. Simulation-only assertions check the `rx_valid` pulse width and counter ranges.
 
-"rx_valid" is an output signal that goes high when transmission is complete.
-### Verfication
+## Loopback Verification
 
-## Loopback Testbench
-The loopback testbench connects TX output to the RX input. This lets me verify that the reveived byte matches the orginal byte
-Here are some of the tests I decided to make:
-* Known patterns: Tests like 00, FF, 55, AA, and 92. This covers known tests that cover all known bits, alternating, and a known random before trying to break the implementation
-* Random loop: This test is implemented in a "for" loop to test random sequencies of bits
-* tx_start while tx_busy: starts one transfer, then tries to start another before the first is finished. The expected result is that the second request is ignored.
-* Changing tx_data during transfer: starts sending a byte, changes the input data bus during the frame, and confirms RX still receives the original byte. This verifies that TX captures its input when it accepts tx_start.
-* Reset during transfer: asserts reset while the modules are active, checks that both return to idle and that TX returns high, then sends another byte to confirm clean recovery.
-## Results
-add waveforms of images of passed test cases
+The loopback testbench connects the TX output directly to the RX input and checks the received data and error signals. Its tests include:
+
+- Known patterns: `00`, `FF`, `55`, `AA`, and `92` (truncated to the configured data width).
+- Randomized transfers.
+- A request made while TX is busy, which must be ignored.
+- Changing `tx_data` during a frame to verify that TX captured the original value.
+- Reset during a transfer, followed by a successful transfer after recovery.
+
+The separate RX testbench injects parity and framing errors. The configuration matrix runs all loopback tests, including the busy-request test, with 25 randomized transfers per configuration. TX reports an ignored busy request as a warning because the test intentionally sends one.
+
 ## Planned Improvements
-- Parity bit
-- Framing-error detection
-- Oversampling receiver
-- Configurable stop bits
-- Configurable data widths
-- FIFO buffering
-- FPGA hardware test
+
+- Synchronize the external RX input and add oversampling.
+- Support configurable stop-bit counts.
+- Add FIFO buffering and hardware flow control.
+- Add functional coverage and FPGA hardware testing.

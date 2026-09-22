@@ -6,6 +6,8 @@ module uart_rx_tb;
     localparam int CLK_SPEED  = 100000000;
     localparam int BAUD_RATE  = 10000000;
     localparam int DATA_BITS  = 8;
+    localparam bit PARITY_ENABLE = 1'b1;
+    localparam bit PARITY_ODD = 1'b1;
 
     localparam int CLKS_PER_BIT = CLK_SPEED / BAUD_RATE;
     localparam int BIT_TIME     = CLK_PERIOD * CLKS_PER_BIT;
@@ -17,18 +19,24 @@ module uart_rx_tb;
     logic [DATA_BITS-1:0] rx_data;
     logic       rx_valid;
     logic       rx_busy;
+    logic       parity_error;
+    logic       framing_error;
 
     uart_rx #(
         .BAUD_RATE(BAUD_RATE),
         .CLK_SPEED(CLK_SPEED),
-        .DATA_BITS(DATA_BITS)
+        .DATA_BITS(DATA_BITS),
+        .PARITY_ENABLE(PARITY_ENABLE),
+        .PARITY_ODD(PARITY_ODD)
     ) dut (
         .clk(clk),
         .rst_n(rst_n),
         .rx(rx),
         .rx_data(rx_data),
         .rx_valid(rx_valid),
-        .rx_busy(rx_busy)
+        .rx_busy(rx_busy),
+        .parity_error(parity_error),
+        .framing_error(framing_error)
     );
 
     //--------------------------------------------------
@@ -56,6 +64,11 @@ module uart_rx_tb;
             // data bits, LSB first
             for (i = 0; i < DATA_BITS; i++) begin
                 rx = data[i];
+                #(BIT_TIME);
+            end
+
+            if (PARITY_ENABLE) begin
+                rx = PARITY_ODD ? ~^data : ^data;
                 #(BIT_TIME);
             end
 
@@ -89,6 +102,11 @@ module uart_rx_tb;
                 #(BIT_TIME);
             end
 
+            if (PARITY_ENABLE) begin
+                rx = PARITY_ODD ? ~^data : ^data;
+                #(BIT_TIME);
+            end
+
             // stop bit
             rx = 1'b1;
 
@@ -102,11 +120,71 @@ module uart_rx_tb;
 
             assert (rx_data == data)
                 else $error("Expected %0h, got %0h", data, rx_data);
+            assert (parity_error == 1'b0)
+                else $error("Unexpected parity error for byte %0h", data);
+            assert (framing_error == 1'b0)
+                else $error("Unexpected framing error for byte %0h", data);
 
             $display("PASS: RX byte %0h", data);
 
             #(BIT_TIME);
             repeat (2) @(posedge clk);
+        end
+    endtask
+
+    task automatic test_bad_stop_bit(input logic [DATA_BITS-1:0] data);
+        int i;
+        begin
+            rx = 1'b1;
+            #(BIT_TIME);
+            rx = 1'b0;
+            #(BIT_TIME);
+            for (i = 0; i < DATA_BITS; i++) begin
+                rx = data[i];
+                #(BIT_TIME);
+            end
+
+            if (PARITY_ENABLE) begin
+                rx = PARITY_ODD ? ~^data : ^data;
+                #(BIT_TIME);
+            end
+
+            // A valid UART stop bit must remain high for the full bit period.
+            rx = 1'b0;
+            wait (framing_error == 1'b1);
+            assert (rx_valid == 1'b0)
+                else $error("RX marked a frame with a bad stop bit as valid");
+            assert (rx_data == data)
+                else $error("Bad-stop test data mismatch: expected %0h, got %0h", data, rx_data);
+            $display("PASS: bad stop bit detected for byte %0h", data);
+
+            rx = 1'b1;
+            #(BIT_TIME);
+        end
+    endtask
+
+    task automatic test_bad_parity(input logic [DATA_BITS-1:0] data);
+        int i;
+        begin
+            rx = 1'b1;
+            #(BIT_TIME);
+            rx = 1'b0;
+            #(BIT_TIME);
+            for (i = 0; i < DATA_BITS; i++) begin
+                rx = data[i];
+                #(BIT_TIME);
+            end
+
+            // Deliberately send the inverse of the configured parity bit.
+            rx = ~(PARITY_ODD ? ~^data : ^data);
+            #(BIT_TIME);
+            rx = 1'b1;
+
+            wait (rx_valid == 1'b1);
+            assert (parity_error == 1'b1)
+                else $error("Bad parity was not detected for byte %0h", data);
+            $display("PASS: bad parity detected for byte %0h", data);
+            #(BIT_TIME);
         end
     endtask
 
@@ -132,6 +210,8 @@ module uart_rx_tb;
                 else $error("RESET test failed: rx_busy did not return low");
             assert (rx_valid == 1'b0)
                 else $error("RESET test failed: rx_valid remained high");
+            assert (framing_error == 1'b0)
+                else $error("RESET test failed: framing_error remained high");
 
             // Release reset on a safe edge and restore the idle line.
             @(negedge clk);
@@ -166,6 +246,8 @@ module uart_rx_tb;
         send_and_check(8'h55);
         send_and_check(8'h00);
         send_and_check(8'hFF);
+        test_bad_parity(8'h3C);
+        test_bad_stop_bit(8'h69);
 
         $display("UART RX tests complete.");
         $finish;

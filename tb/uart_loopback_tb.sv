@@ -1,10 +1,16 @@
-module uart_loopback_tb;
+module uart_loopback_tb #(
+    parameter int CLK_SPEED = 100,
+    parameter int BAUD_RATE = 10,
+    parameter int DATA_BITS = 8,
+    parameter bit PARITY_ENABLE = 1'b1,
+    parameter bit PARITY_ODD = 1'b1,
+    parameter int RANDOM_TESTS = 100,
+    parameter bit RUN_BUSY_TEST = 1'b1,
+    parameter bit DUMP_WAVES = 1'b1
+);
 
     // Keep these settings aligned with both DUT instances below.
     localparam int CLK_PERIOD = 10;
-    localparam int CLK_SPEED  = 100;
-    localparam int BAUD_RATE  = 10;
-    localparam int DATA_BITS  = 8;
 
     localparam int CLKS_PER_BIT = CLK_SPEED / BAUD_RATE;
     localparam int BIT_TIME     = CLK_PERIOD * CLKS_PER_BIT;
@@ -21,11 +27,15 @@ module uart_loopback_tb;
     logic [DATA_BITS-1:0] rx_data;
     logic rx_valid;
     logic rx_busy;
+    logic parity_error;
+    logic framing_error;
 
     uart_tx #(
         .BAUD_RATE(BAUD_RATE),
         .CLK_SPEED(CLK_SPEED),
-        .DATA_BITS(DATA_BITS)
+        .DATA_BITS(DATA_BITS),
+        .PARITY_ENABLE(PARITY_ENABLE),
+        .PARITY_ODD(PARITY_ODD)
     ) tx_dut (
         .clk(clk),
         .rst_n(rst_n),
@@ -38,14 +48,18 @@ module uart_loopback_tb;
     uart_rx #(
         .BAUD_RATE(BAUD_RATE),
         .CLK_SPEED(CLK_SPEED),
-        .DATA_BITS(DATA_BITS)
+        .DATA_BITS(DATA_BITS),
+        .PARITY_ENABLE(PARITY_ENABLE),
+        .PARITY_ODD(PARITY_ODD)
     ) rx_dut (
         .clk(clk),
         .rst_n(rst_n),
         .rx(serial_line),
         .rx_data(rx_data),
         .rx_valid(rx_valid),
-        .rx_busy(rx_busy)
+        .rx_busy(rx_busy),
+        .parity_error(parity_error),
+        .framing_error(framing_error)
     );
 
     // Clock generation
@@ -81,6 +95,11 @@ module uart_loopback_tb;
 
             wait (rx_valid == 1'b1);
 
+            assert (parity_error == 1'b0)
+                else $error("Unexpected parity error for byte %0h", data);
+            assert (framing_error == 1'b0)
+                else $error("Unexpected framing error for byte %0h", data);
+
             assert (rx_data == data)
                 else $error("Expected %0h, got %0h", data, rx_data);
 
@@ -103,7 +122,7 @@ module uart_loopback_tb;
         logic [DATA_BITS-1:0] rand_byte;
         begin
             $display("\n--- test_random_loopback ---");
-            repeat (100) begin
+            repeat (RANDOM_TESTS) begin
                 rand_byte = $urandom;
                 send_and_expect(rand_byte);
             end
@@ -205,11 +224,13 @@ module uart_loopback_tb;
         // end-to-end suite with a different UART configuration.
         test_basic_loopback();
         test_random_loopback();
-        test_tx_start_while_busy_is_ignored();
+        if (RUN_BUSY_TEST)
+            test_tx_start_while_busy_is_ignored();
         test_tx_data_is_captured_at_start();
         test_reset_during_transfer();
 
-        $display("\nAll UART loopback tests complete.");
+        $display("\nAll UART loopback tests complete: DATA_BITS=%0d PARITY_ENABLE=%0d PARITY_ODD=%0d CLKS_PER_BIT=%0d",
+                 DATA_BITS, PARITY_ENABLE, PARITY_ODD, CLKS_PER_BIT);
         $finish;
     end
 
@@ -219,8 +240,10 @@ module uart_loopback_tb;
     end
     
     initial begin
-        $dumpfile("uart_loopback.vcd");
-        $dumpvars(0, uart_loopback_tb);
+        if (DUMP_WAVES) begin
+            $dumpfile("uart_loopback.vcd");
+            $dumpvars(0, uart_loopback_tb);
+        end
     end
 
 endmodule
